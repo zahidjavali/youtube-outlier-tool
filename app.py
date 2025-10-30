@@ -33,10 +33,10 @@ def get_youtube_service(api_key: str):
         return None
 
 @st.cache_data(show_spinner=False)
-def fetch_video_ids(youtube, search_type: str, query: str):
+def fetch_video_ids(_youtube, search_type: str, query: str):
     """Fetch up to 50 video IDs by channel ID or search query."""
     if search_type == "channel":
-        req = youtube.search().list(
+        req = _youtube.search().list(
             part="id",
             channelId=query,
             maxResults=50,
@@ -44,7 +44,7 @@ def fetch_video_ids(youtube, search_type: str, query: str):
             type="video",
         )
     else:
-        req = youtube.search().list(
+        req = _youtube.search().list(
             part="id",
             q=query,
             maxResults=50,
@@ -55,11 +55,11 @@ def fetch_video_ids(youtube, search_type: str, query: str):
     return [item["id"]["videoId"] for item in resp.get("items", [])]
 
 @st.cache_data(show_spinner=False)
-def get_video_details(youtube, video_ids):
+def get_video_details(_youtube, video_ids):
     """Fetch snippet and statistics for a list of up to 50 videos."""
     if not video_ids:
         return []
-    req = youtube.videos().list(part="snippet,statistics", id=",".join(video_ids))
+    req = _youtube.videos().list(part="snippet,statistics", id=",".join(video_ids))
     resp = req.execute()
     return resp.get("items", [])
 
