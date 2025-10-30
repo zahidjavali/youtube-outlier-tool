@@ -30,7 +30,7 @@ def get_youtube_service(api_key: str):
 
 @st.cache_data(show_spinner=False)
 def fetch_video_ids(_youtube, search_type: str, query: str):
-    """Fetch up to 50 video IDs by channel ID or search query."""
+    """Fetch up to 50 video IDs by channel ID or search query. UNDERSCORE on _youtube prevents hashing."""
     if search_type == "channel":
         req = _youtube.search().list(
             part="id",
@@ -52,7 +52,7 @@ def fetch_video_ids(_youtube, search_type: str, query: str):
 
 @st.cache_data(show_spinner=False)
 def get_video_details(_youtube, video_ids):
-    """Fetch snippet and statistics for a list of up to 50 videos."""
+    """Fetch snippet and statistics for a list of up to 50 videos. UNDERSCORE on _youtube prevents hashing."""
     if not video_ids:
         return []
     req = _youtube.videos().list(part="snippet,statistics", id=",".join(video_ids))
@@ -153,13 +153,13 @@ if st.session_state.api_key_valid:
                 try:
                     search_type = "channel" if search_type_label == "Channel ID" else "search"
                     
-                    # Fetch video IDs
+                    # Fetch video IDs - passing service object
                     video_ids = fetch_video_ids(st.session_state.youtube_service, search_type, user_input_clean)
                     
                     if not video_ids:
                         st.warning("⚠️ No videos found for your search. Try a different query.")
                     else:
-                        # Fetch video details
+                        # Fetch video details - passing service object
                         video_items = get_video_details(st.session_state.youtube_service, video_ids)
                         
                         # Analyze
