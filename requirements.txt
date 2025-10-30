@@ -1,4 +1,8 @@
 streamlit==1.38.0
-google-api-python-client==2.15.0
+google-api-python-client==2.147.0
+google-auth==2.35.0
+google-auth-httplib2==0.2.0
+google-auth-oauthlib==1.2.1
+httplib2==0.22.0
 pandas==2.2.2
 numpy==1.26.4
