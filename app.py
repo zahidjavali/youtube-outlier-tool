@@ -257,7 +257,7 @@ else:
                     
                     st.markdown("---")
                     
-                    # --- Top Outliers Thumbnails ---
+                                        # --- Top Outliers Thumbnails ---
                     if not outliers.empty:
                         st.markdown("### ⭐ Top 3 Outlier Videos")
                         top3 = outliers.head(3)
@@ -265,8 +265,15 @@ else:
                         cols = st.columns(3)
                         for idx, (_, row) in enumerate(top3.iterrows()):
                             with cols[idx]:
-                                if row["thumbnail"]:
-                                    st.image(row["thumbnail"], use_container_width=True)
+                                # Only display thumbnail if URL exists and is valid
+                                if row["thumbnail"] and isinstance(row["thumbnail"], str) and len(row["thumbnail"]) > 0:
+                                    try:
+                                        st.image(row["thumbnail"], use_container_width=True)
+                                    except Exception as thumb_err:
+                                        st.warning("⚠️ Thumbnail unavailable")
+                                else:
+                                    st.info("No thumbnail available")
+                                
                                 st.markdown(f"""
                                 <div class="outlier-card">
                                     <div class="outlier-title">{row['title'][:50]}...</div>
@@ -288,6 +295,7 @@ else:
                                 """, unsafe_allow_html=True)
                     else:
                         st.info("No outliers detected with strict filtering criteria.")
+
                     
                     st.markdown("---")
                     
