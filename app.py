@@ -110,96 +110,108 @@ def analyze_video_data(videos):
 # --- Initialize Session State ---
 if "api_key_valid" not in st.session_state:
     st.session_state.api_key_valid = False
-if "search_query" not in st.session_state:
-    st.session_state.search_query = ""
-if "search_type_val" not in st.session_state:
-    st.session_state.search_type_val = "search"
 
-# --- UI Flow ---
+# --- API Key Validation Flow ---
 
 if not st.session_state.api_key_valid:
     st.warning("A YouTube Data API v3 key is required to use this tool.")
-    api_key = st.text_input("Enter your YouTube API Key", type="password", key="api_input")
+    api_key = st.text_input("Enter your YouTube API Key", type="password")
+    
     if st.button("Validate Key"):
-        if api_key.strip():
-            yt = get_youtube_service(api_key)
-            if yt:
-                st.session_state.api_key_valid = True
-                st.session_state.youtube_service = yt
-                st.success("API key is valid. You can now analyze videos.")
-                st.rerun()
+        if api_key and len(api_key) > 10:
+            with st.spinner("Validating API key..."):
+                yt = get_youtube_service(api_key)
+                if yt:
+                    st.session_state.api_key_valid = True
+                    st.session_state.youtube_service = yt
+                    st.success("API key is valid!")
+                    st.rerun()
         else:
-            st.error("Please enter an API key.")
-else:
-    st.success("API key validated. Ready to analyze.")
+            st.error("Please enter a valid API key.")
+
+# --- Main App (After Key Validation) ---
+
+if st.session_state.api_key_valid:
+    st.success("✅ API key validated. Ready to analyze videos.")
     
-    # Search type selection
-    search_type_label = st.radio("Search by", ("Channel ID", "Search Query"), horizontal=True)
-    st.session_state.search_type_val = "channel" if search_type_label == "Channel ID" else "search"
+    col1, col2 = st.columns(2)
     
-    # Search input - store in session state
-    placeholder = "e.g., UCsT0YIqwnpJCM-mx7-gSA4Q" if search_type_label == "Channel ID" else "e.g., 'physiotherapy tips'"
-    st.session_state.search_query = st.text_input(f"Enter {search_type_label}", value=st.session_state.search_query, placeholder=placeholder, key="query_input")
+    with col1:
+        search_type_label = st.radio("Search by:", ("Channel ID", "Search Query"))
     
-    # Analyze button
-    if st.button("Analyze Videos", key="analyze_btn"):
-        query = st.session_state.search_query.strip()
-        if not query:
-            st.error("Please enter a search term or channel ID.")
+    with col2:
+        placeholder = "e.g., UCsT0YIqwnpJCM-mx7-gSA4Q" if search_type_label == "Channel ID" else "e.g., physiotherapy tips"
+        user_input = st.text_input("Enter your search:", placeholder=placeholder)
+    
+    if st.button("🔍 Analyze Videos", use_container_width=True):
+        user_input_clean = user_input.strip() if user_input else ""
+        
+        if not user_input_clean:
+            st.error("❌ Please enter a search term or channel ID.")
         else:
-            with st.spinner("Fetching and analyzing videos..."):
+            with st.spinner("🔄 Fetching and analyzing videos..."):
                 try:
-                    ids = fetch_video_ids(st.session_state.youtube_service, st.session_state.search_type_val, query)
-                    if not ids:
-                        st.warning("No videos found for the given input.")
+                    search_type = "channel" if search_type_label == "Channel ID" else "search"
+                    
+                    # Fetch video IDs
+                    video_ids = fetch_video_ids(st.session_state.youtube_service, search_type, user_input_clean)
+                    
+                    if not video_ids:
+                        st.warning("⚠️ No videos found for your search. Try a different query.")
                     else:
-                        items = get_video_details(st.session_state.youtube_service, ids)
-                        df = analyze_video_data(items)
-                        if df.empty:
-                            st.warning("No analyzable video stats returned.")
+                        # Fetch video details
+                        video_items = get_video_details(st.session_state.youtube_service, video_ids)
+                        
+                        # Analyze
+                        results_df = analyze_video_data(video_items)
+                        
+                        if results_df.empty:
+                            st.warning("⚠️ Could not process video data. Some videos may have disabled stats.")
                         else:
-                            st.session_state.results_df = df
-                            st.success(f"Found {len(df)} videos with {len(df[df['is_outlier']])} outliers!")
+                            # Display results
+                            outliers = results_df[results_df["is_outlier"]]
+                            
+                            st.success(f"✅ Analysis complete! Found {len(results_df)} videos with {len(outliers)} outliers.")
+                            
+                            st.markdown("---")
+                            st.subheader("📊 Analysis Results")
+                            
+                            c1, c2, c3 = st.columns(3)
+                            c1.metric("Videos Analyzed", len(results_df))
+                            c2.metric("Outliers Detected", len(outliers))
+                            c3.metric("Outlier %", f"{(len(outliers) / len(results_df) * 100):.1f}%")
+                            
+                            st.markdown("---")
+                            st.subheader("📈 Charts")
+                            
+                            st.write("**View Velocity Over Time**")
+                            st.line_chart(results_df.set_index("publish_date")["velocity"])
+                            
+                            if not outliers.empty:
+                                st.write("**Top 15 Outliers by View Velocity**")
+                                top_outliers = outliers.sort_values("velocity", ascending=False).head(15)
+                                st.bar_chart(top_outliers.set_index("title")["velocity"])
+                            
+                            st.markdown("---")
+                            st.subheader("📋 Detailed Video Data")
+                            st.dataframe(
+                                results_df[["title", "publish_date", "views", "velocity", "engagement_rate", "z_score", "is_outlier"]],
+                                use_container_width=True,
+                                hide_index=True
+                            )
+                
                 except HttpError as e:
                     if getattr(e, "resp", None) and getattr(e.resp, "status", None) == 403:
-                        st.error("Quota exceeded for this API key today. Try again tomorrow or use another key.")
+                        st.error("❌ API Quota Exceeded: Your key has used its daily quota. Try again tomorrow or use a different key.")
                     else:
-                        st.error(f"API error: {getattr(e, 'reason', str(e))}")
+                        reason = getattr(e, "reason", str(e))
+                        st.error(f"❌ API Error: {reason}")
                 except Exception as e:
-                    st.error(f"Unexpected error: {e}")
-
-# --- Results Display ---
-if "results_df" in st.session_state:
-    df = st.session_state.results_df
-    st.subheader("Analysis Results")
-
-    outliers = df[df["is_outlier"]]
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Videos Analyzed", len(df))
-    c2.metric("Outliers Detected", len(outliers))
-    c3.metric("Outlier Percentage", f"{(len(outliers) / len(df)):.1%}" if len(df) else "0%")
-
-    st.markdown("---")
-    st.subheader("Charts")
-
-    st.write("#### View Velocity Over Time")
-    st.line_chart(df.set_index("publish_date")["velocity"])
-
-    if not outliers.empty:
-        st.write("#### Top Outliers by View Velocity")
-        top = outliers.sort_values("velocity", ascending=False).head(15)
-        st.bar_chart(top.set_index("title")["velocity"])
-
-    st.markdown("---")
-    st.subheader("Detailed Video Data")
-    st.dataframe(
-        df[["title", "publish_date", "views", "velocity", "engagement_rate", "z_score", "is_outlier"]],
-        use_container_width=True,
-    )
+                    st.error(f"❌ Unexpected error: {str(e)}")
 
 # --- Footer ---
 st.markdown("---")
 st.markdown(
-    "Free tool by [Write Wing Media](https://writewing.in) – Need an API key? "
-    "[Get one here](https://console.cloud.google.com/apis/library/youtubedata-api.googleapis.com)."
+    "🚀 Free tool by [**WriteWing.in**](https://writewing.in) | "
+    "[Get your free YouTube API key](https://console.cloud.google.com/apis/library/youtubedata-api.googleapis.com)"
 )
