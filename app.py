@@ -130,15 +130,13 @@ if not st.session_state.api_key_valid:
         else:
             st.error("Please enter an API key.")
 else:
-    with st.form("search_form"):
-        st.success("API key validated.")
-        search_type_label = st.radio("Search by", ("Channel ID", "Search Query"), horizontal=True)
-        placeholder = "e.g., UCsT0YIqwnpJCM-mx7-gSA4Q" if search_type_label == "Channel ID" else "e.g., 'streamlit tutorial'"
-        query = st.text_input(f"Enter {search_type_label}", placeholder=placeholder)
-        submitted = st.form_submit_button("Analyze Videos")
-
-    if submitted:
-        if not query:
+    st.success("API key validated.")
+    search_type_label = st.radio("Search by", ("Channel ID", "Search Query"), horizontal=True)
+    placeholder = "e.g., UCsT0YIqwnpJCM-mx7-gSA4Q" if search_type_label == "Channel ID" else "e.g., 'streamlit tutorial'"
+    query = st.text_input(f"Enter {search_type_label}", placeholder=placeholder)
+    
+    if st.button("Analyze Videos"):
+        if not query or query.strip() == "":
             st.warning("Please enter a search term or channel ID.")
         else:
             with st.spinner("Fetching and analyzing videos..."):
