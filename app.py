@@ -16,13 +16,9 @@ st.markdown("A free tool to detect outlier videos from a YouTube channel or sear
 
 @st.cache_resource
 def get_youtube_service(api_key: str):
-    """
-    Build and validate the YouTube API service object.
-    Cache as a resource because it's a client/connection-like object.
-    """
+    """Build and validate the YouTube API service object."""
     try:
         service = build("youtube", "v3", developerKey=api_key)
-        # Low-cost validation call (GoogleDevelopers channel)
         service.channels().list(part="id", id="UC_x5XG1OV2P6uZZ5FSM9Ttw").execute()
         return service
     except HttpError as e:
@@ -111,16 +107,21 @@ def analyze_video_data(videos):
     df["is_outlier"] = (df["z_score"] > 2) | (df["velocity"] >= p90)
     return df
 
-# --- UI Flow ---
-
+# --- Initialize Session State ---
 if "api_key_valid" not in st.session_state:
     st.session_state.api_key_valid = False
+if "search_query" not in st.session_state:
+    st.session_state.search_query = ""
+if "search_type_val" not in st.session_state:
+    st.session_state.search_type_val = "search"
+
+# --- UI Flow ---
 
 if not st.session_state.api_key_valid:
     st.warning("A YouTube Data API v3 key is required to use this tool.")
-    api_key = st.text_input("Enter your YouTube API Key", type="password")
+    api_key = st.text_input("Enter your YouTube API Key", type="password", key="api_input")
     if st.button("Validate Key"):
-        if api_key:
+        if api_key.strip():
             yt = get_youtube_service(api_key)
             if yt:
                 st.session_state.api_key_valid = True
@@ -130,19 +131,25 @@ if not st.session_state.api_key_valid:
         else:
             st.error("Please enter an API key.")
 else:
-    st.success("API key validated.")
-    search_type_label = st.radio("Search by", ("Channel ID", "Search Query"), horizontal=True)
-    placeholder = "e.g., UCsT0YIqwnpJCM-mx7-gSA4Q" if search_type_label == "Channel ID" else "e.g., 'streamlit tutorial'"
-    query = st.text_input(f"Enter {search_type_label}", placeholder=placeholder)
+    st.success("API key validated. Ready to analyze.")
     
-    if st.button("Analyze Videos"):
-        if not query or query.strip() == "":
-            st.warning("Please enter a search term or channel ID.")
+    # Search type selection
+    search_type_label = st.radio("Search by", ("Channel ID", "Search Query"), horizontal=True)
+    st.session_state.search_type_val = "channel" if search_type_label == "Channel ID" else "search"
+    
+    # Search input - store in session state
+    placeholder = "e.g., UCsT0YIqwnpJCM-mx7-gSA4Q" if search_type_label == "Channel ID" else "e.g., 'physiotherapy tips'"
+    st.session_state.search_query = st.text_input(f"Enter {search_type_label}", value=st.session_state.search_query, placeholder=placeholder, key="query_input")
+    
+    # Analyze button
+    if st.button("Analyze Videos", key="analyze_btn"):
+        query = st.session_state.search_query.strip()
+        if not query:
+            st.error("Please enter a search term or channel ID.")
         else:
             with st.spinner("Fetching and analyzing videos..."):
                 try:
-                    search_type = "channel" if search_type_label == "Channel ID" else "search"
-                    ids = fetch_video_ids(st.session_state.youtube_service, search_type, query)
+                    ids = fetch_video_ids(st.session_state.youtube_service, st.session_state.search_type_val, query)
                     if not ids:
                         st.warning("No videos found for the given input.")
                     else:
@@ -152,6 +159,7 @@ else:
                             st.warning("No analyzable video stats returned.")
                         else:
                             st.session_state.results_df = df
+                            st.success(f"Found {len(df)} videos with {len(df[df['is_outlier']])} outliers!")
                 except HttpError as e:
                     if getattr(e, "resp", None) and getattr(e.resp, "status", None) == 403:
                         st.error("Quota exceeded for this API key today. Try again tomorrow or use another key.")
@@ -160,7 +168,7 @@ else:
                 except Exception as e:
                     st.error(f"Unexpected error: {e}")
 
-# --- Results ---
+# --- Results Display ---
 if "results_df" in st.session_state:
     df = st.session_state.results_df
     st.subheader("Analysis Results")
@@ -192,6 +200,6 @@ if "results_df" in st.session_state:
 # --- Footer ---
 st.markdown("---")
 st.markdown(
-    "Free tool by [WriteWing.in](https://writewing.in) – Need an API key? "
+    "Free tool by [Write Wing Media](https://writewing.in) – Need an API key? "
     "[Get one here](https://console.cloud.google.com/apis/library/youtubedata-api.googleapis.com)."
 )
