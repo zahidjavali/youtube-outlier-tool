@@ -18,6 +18,10 @@ st.markdown("""
         margin: 15px 0;
         box-shadow: 0 4px 12px rgba(0,0,0,0.15);
     }
+    .outlier-card.outlier-highlight {
+        background: linear-gradient(135deg, #ffd700 0%, #ffed4e 100%);
+        color: #333;
+    }
     .outlier-title {
         font-size: 18px;
         font-weight: bold;
@@ -26,7 +30,7 @@ st.markdown("""
     }
     .outlier-stats {
         display: grid;
-        grid-template-columns: 1fr 1fr 1fr;
+        grid-template-columns: 1fr 1fr 1fr 1fr;
         gap: 15px;
         margin-top: 15px;
         font-size: 14px;
@@ -38,18 +42,42 @@ st.markdown("""
         text-align: center;
     }
     .stat-value {
-        font-size: 20px;
+        font-size: 18px;
         font-weight: bold;
     }
     .stat-label {
         font-size: 12px;
         opacity: 0.9;
     }
+    .video-card {
+        border: 1px solid #ddd;
+        border-radius: 12px;
+        padding: 15px;
+        margin: 10px 0;
+        background: #f9f9f9;
+    }
+    .video-card.outlier {
+        border-color: #ffd700;
+        background: #fff9e6;
+        box-shadow: 0 2px 8px rgba(255,215,0,0.3);
+    }
+    .thumbnail-link {
+        text-decoration: none;
+        color: inherit;
+    }
+    .watch-link {
+        color: #1da1f2;
+        text-decoration: none;
+        font-weight: bold;
+    }
+    .watch-link:hover {
+        text-decoration: underline;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 st.title("🎬 YouTube Outlier Finder")
-st.markdown("Discover viral outlier videos from any YouTube channel or search query, inspired by 1of10.com.")
+st.markdown("Discover viral outlier videos from small channels (low subs, high views) for any search query or channel, inspired by 1of10.com.")
 
 # --- API Service ---
 
@@ -67,12 +95,31 @@ def get_youtube_service(api_key: str):
         st.error(f"Unexpected validation error: {e}")
         return None
 
-# --- Outlier Analysis ---
+# --- Fetch Channel Stats (Batch) ---
 
-def analyze_videos(youtube_service, search_type, query):
-    """Fetch, analyze with relaxed outlier detection to match Google AI Studio."""
+@st.cache_data(ttl=3600)  # Cache for 1 hour
+def get_channel_stats(youtube_service, channel_ids):
+    """Batch fetch subscriber counts for channels."""
+    if not channel_ids:
+        return {}
     try:
-        # Fetch video IDs
+        # Batch up to 50 channel IDs
+        req = youtube_service.channels().list(part="statistics", id=",".join(channel_ids))
+        channels = req.execute().get("items", [])
+        return {ch["id"]: int(ch.get("statistics", {}).get("subscriberCount", 0)) for ch in channels}
+    except HttpError as e:
+        st.warning(f"Channel stats fetch error: {getattr(e, 'reason', str(e))}")
+        return {}
+    except Exception as e:
+        st.error(f"Unexpected channel stats error: {e}")
+        return {}
+
+# --- Outlier Analysis (New Criteria: High Views vs Low Subs) ---
+
+def analyze_videos(youtube_service, search_type, query, view_multiplier=100, min_views=100000):
+    """Fetch 50 videos, analyze for outliers: views > multiplier * subs, min views threshold."""
+    try:
+        # Fetch video IDs with snippets
         if search_type == "channel":
             req = youtube_service.search().list(
                 part="snippet",
@@ -87,22 +134,26 @@ def analyze_videos(youtube_service, search_type, query):
                 q=query,
                 maxResults=50,
                 type="video",
-                order="date"
+                order="viewCount"  # Order by views descending for better outlier potential
             )
         search_results = req.execute().get("items", [])
         
         if not search_results:
-            return None, "No videos found."
+            return None, None, "No videos found."
         
-        # Extract video IDs and thumbnails from search results
+        # Extract unique channel IDs and video details
+        channel_ids = list(set(item["snippet"]["channelId"] for item in search_results))
         video_ids = [item["id"]["videoId"] for item in search_results]
-        search_thumbnails = {item["id"]["videoId"]: item.get("snippet", {}).get("thumbnails", {}).get("high", {}).get("url", "") for item in search_results}
+        search_thumbnails = {item["id"]["videoId"]: item.get("snippet", {}).get("thumbnails", {}).get("medium", {}).get("url", "") for item in search_results}
         
-        # Fetch detailed stats
+        # Fetch channel subscriber counts
+        channel_subs = get_channel_stats(youtube_service, channel_ids)
+        
+        # Fetch detailed video stats
         req = youtube_service.videos().list(part="snippet,statistics", id=",".join(video_ids))
         videos = req.execute().get("items", [])
         
-        # Analyze with relaxed thresholds
+        # Analyze
         rows = []
         for v in videos:
             stats = v.get("statistics", {}) or {}
@@ -115,17 +166,24 @@ def analyze_videos(youtube_service, search_type, query):
             views = int(stats.get("viewCount", 0))
             likes = int(stats.get("likeCount", 0))
             comments = int(stats.get("commentCount", 0))
+            channel_id = snip.get("channelId", "")
+            subs = channel_subs.get(channel_id, 0)  # 0 if hidden/unavailable
             
-            # Minimum views filter
-            if views < 10:
+            # Filter: Minimum views threshold
+            if views < min_views:
                 continue
             
             engagement_rate = (likes + comments) / views if views > 0 else 0
             vid_id = v.get("id")
-            # Get thumbnail from search results first, fall back to snippet, then auto-generate
-            thumbnail = search_thumbnails.get(vid_id, snip.get("thumbnails", {}).get("high", {}).get("url", ""))
+            # Thumbnail fallback
+            thumbnail = search_thumbnails.get(vid_id, snip.get("thumbnails", {}).get("medium", {}).get("url", ""))
             if not thumbnail:
-                thumbnail = f"https://img.youtube.com/vi/{vid_id}/hqdefault.jpg"
+                thumbnail = f"https://img.youtube.com/vi/{vid_id}/mqdefault.jpg"  # Medium quality for speed
+            
+            # Outlier score: Views multiplier vs subs
+            multiplier_ratio = views / max(subs, 1)  # Avoid division by zero
+            is_outlier = multiplier_ratio > view_multiplier
+            outlier_score = multiplier_ratio  # For sorting
             
             rows.append({
                 "title": snip.get("title", "N/A"),
@@ -133,36 +191,31 @@ def analyze_videos(youtube_service, search_type, query):
                 "views": views,
                 "velocity": views / age_days,
                 "engagement_rate": engagement_rate,
+                "subscribers": subs,
+                "multiplier_ratio": multiplier_ratio,
+                "outlier_score": outlier_score,
+                "is_outlier": is_outlier,
                 "video_id": vid_id,
                 "thumbnail": thumbnail,
+                "channel_id": channel_id,
                 "likes": likes,
                 "comments": comments,
                 "age_days": age_days,
             })
         
         if not rows:
-            return None, "No analyzable data."
+            return None, None, "No videos meet the criteria (high views from small channels)."
         
-        df = pd.DataFrame(rows).sort_values("publish_date")
-        vel = df["velocity"]
+        df = pd.DataFrame(rows)
+        outliers_df = df[df["is_outlier"]].sort_values("outlier_score", ascending=False)
         
-        # Z-score calculation
-        if len(vel) > 1 and vel.std() > 0:
-            df["z_score"] = (vel - vel.mean()) / vel.std()
-        else:
-            df["z_score"] = 0
-        
-        # Outlier detection: z-score > 2.0 OR velocity in top 10%
-        velocity_top_10_percentile = df["velocity"].quantile(0.90)
-        df["is_outlier"] = (df["z_score"] > 2.0) | (df["velocity"] >= velocity_top_10_percentile)
-        
-        return df, None
+        return df, outliers_df, None
     except HttpError as e:
         if getattr(e, "resp", None) and getattr(e.resp, "status", None) == 403:
-            return None, "❌ Quota exceeded. Try tomorrow."
-        return None, f"API error: {getattr(e, 'reason', str(e))}"
+            return None, None, "❌ Quota exceeded. Try tomorrow."
+        return None, None, f"API error: {getattr(e, 'reason', str(e))}"
     except Exception as e:
-        return None, f"Error: {str(e)}"
+        return None, None, f"Error: {str(e)}"
 
 # --- Initialize Session State ---
 
@@ -190,7 +243,7 @@ else:
     
     # --- Analysis Configuration ---
     st.markdown("### Analysis Configuration")
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     
     with col1:
         stype = st.radio("Search by:", ("🔴 Search Term", "⚪ By Channel"), horizontal=False)
@@ -198,83 +251,74 @@ else:
     
     with col2:
         if stype == "🔴 Search Term":
-            query = st.text_input("Search Term", placeholder="e.g., physiotherapy, tech reviews, cooking...")
+            query = st.text_input("Search Term", placeholder="e.g., physiotherapy, tech reviews")
         else:
             query = st.text_input("Channel ID", placeholder="e.g., UCsT0YIqwnpJCM-mx7-gSA4Q")
+        
+        view_multiplier = st.slider("View Multiplier (x Subs)", min_value=10, max_value=1000, value=100, help="Outlier if views > this x channel subs")
+        min_views_threshold = st.slider("Min Views", min_value=10000, max_value=1000000, value=100000, help="Absolute min views for consideration")
     
     if st.button("🔍 Find Outliers", use_container_width=True, type="primary"):
         if not query or not query.strip():
             st.error("❌ Please enter a search term or channel ID.")
         else:
-            with st.spinner("🔄 Fetching and analyzing videos..."):
-                df, err = analyze_videos(st.session_state.yt, stype_val, query.strip())
+            with st.spinner("🔄 Fetching 50 videos, channel stats, and analyzing..."):
+                df, outliers_df, err = analyze_videos(st.session_state.yt, stype_val, query.strip(), view_multiplier, min_views_threshold)
                 if err:
                     st.error(err)
                 else:
-                    outliers = df[df["is_outlier"]].sort_values("z_score", ascending=False)
-                    
                     # --- Top Stats ---
                     st.markdown("### 📊 Analysis Results")
                     c1, c2, c3, c4 = st.columns(4)
-                    c1.metric("Total Videos", len(df), delta=None)
-                    c2.metric("Outliers Found", len(outliers), delta=None)
-                    c3.metric("Outlier %", f"{len(outliers)/len(df)*100:.1f}%", delta=None)
-                    c4.metric("Avg Velocity", f"{df['velocity'].mean():.0f}", delta=None)
+                    c1.metric("Total Videos (50 fetched)", len(df), delta=None)
+                    c2.metric("True Outliers", len(outliers_df), delta=None)
+                    c3.metric("Outlier %", f"{len(outliers_df)/len(df)*100:.1f}%", delta=None)
+                    c4.metric("Avg Multiplier", f"{df['multiplier_ratio'].mean():.0f}x", delta=None)
                     
                     st.markdown("---")
                     
-                    # --- Top Outliers Thumbnails with YouTube Links ---
-                    if not outliers.empty:
-                        st.markdown("### ⭐ Top 3 Outlier Videos")
-                        top3 = outliers.head(3)
-                        
-                        cols = st.columns(3)
-                        for idx, (_, row) in enumerate(top3.iterrows()):
-                            with cols[idx]:
-                                # YouTube URL for this video
-                                youtube_url = f"https://www.youtube.com/watch?v={row['video_id']}"
-                                
-                                # Clickable thumbnail with YouTube link
-                                if row["thumbnail"] and isinstance(row["thumbnail"], str) and len(row["thumbnail"]) > 0:
-                                    try:
-                                        st.markdown(
-                                            f'<a href="{youtube_url}" target="_blank">'
-                                            f'<img src="{row["thumbnail"]}" style="width:100%; border-radius:8px; cursor:pointer;">'
-                                            f'</a>',
-                                            unsafe_allow_html=True
-                                        )
-                                    except Exception as thumb_err:
-                                        st.warning("⚠️ Thumbnail unavailable")
-                                else:
-                                    st.info("No thumbnail available")
-                                
-                                # Card with YouTube hyperlinks
-                                st.markdown(f"""
-                                <div class="outlier-card">
-                                    <a href="{youtube_url}" target="_blank" style="text-decoration: none; color: white;">
-                                        <div class="outlier-title">{row['title'][:50]}...</div>
+                    # --- All Outlier Videos (Highlighted Cards) ---
+                    if not outliers_df.empty:
+                        st.markdown("### ⭐ True Outlier Videos (Small Channels, High Views)")
+                        for _, row in outliers_df.iterrows():
+                            youtube_url = f"https://www.youtube.com/watch?v={row['video_id']}"
+                            is_outlier_class = "outlier" if row["is_outlier"] else ""
+                            st.markdown(f"""
+                            <div class="video-card {is_outlier_class}">
+                                <div style="display: flex; gap: 15px;">
+                                    <a href="{youtube_url}" target="_blank" class="thumbnail-link">
+                                        <img src="{row['thumbnail']}" style="width: 120px; height: 90px; border-radius: 8px; object-fit: cover;">
                                     </a>
-                                    <div class="outlier-stats">
-                                        <div class="stat-box">
-                                            <div class="stat-value">{int(row['views']):,}</div>
-                                            <div class="stat-label">Views</div>
-                                        </div>
-                                        <div class="stat-box">
-                                            <div class="stat-value">{row['velocity']:.0f}</div>
-                                            <div class="stat-label">Velocity</div>
-                                        </div>
-                                        <div class="stat-box">
-                                            <div class="stat-value">{row['z_score']:.2f}</div>
-                                            <div class="stat-label">Z-Score</div>
-                                        </div>
-                                    </div>
-                                    <div style="text-align: center; margin-top: 12px;">
-                                        <a href="{youtube_url}" target="_blank" style="color: white; text-decoration: underline; font-size: 14px;">▶ Watch on YouTube →</a>
+                                    <div style="flex: 1;">
+                                        <h4 style="margin: 0 0 5px 0;">
+                                            <a href="{youtube_url}" target="_blank" style="color: #1da1f2; text-decoration: none; font-weight: bold;">{row['title'][:60]}...</a>
+                                        </h4>
+                                        <p><strong>Views:</strong> {int(row['views']):,} | <strong>Subs:</strong> {row['subscribers']:,} | <strong>Multiplier:</strong> {row['multiplier_ratio']:.0f}x</p>
+                                        <p><strong>Velocity:</strong> {row['velocity']:.0f}/day | <strong>Engagement:</strong> {row['engagement_rate']*100:.1f}%</p>
+                                        <a href="{youtube_url}" target="_blank" class="watch-link">▶ Watch on YouTube →</a>
                                     </div>
                                 </div>
-                                """, unsafe_allow_html=True)
+                            </div>
+                            """, unsafe_allow_html=True)
                     else:
-                        st.info("No outliers detected.")
+                        st.info("No true outliers found (videos with views 100x+ channel subs and >100k views). Try adjusting thresholds.")
+                    
+                    st.markdown("---")
+                    
+                    # --- All 50 Videos (with Hyperlinks) ---
+                    st.markdown("### 📹 All 50 Videos Fetched")
+                    st.markdown(f"**Showing all videos sorted by outlier score.** Non-outliers are from larger channels or below thresholds.")
+                    for _, row in df.sort_values("outlier_score", ascending=False).iterrows():
+                        youtube_url = f"https://www.youtube.com/watch?v={row['video_id']}"
+                        is_outlier_class = "outlier" if row["is_outlier"] else ""
+                        st.markdown(f"""
+                        <div class="video-card {is_outlier_class}" style="font-size: 14px;">
+                            <strong>{row['title'][:80]}...</strong> 
+                            <a href="{youtube_url}" target="_blank" class="watch-link" style="float: right;">▶ Watch</a><br>
+                            Views: {int(row['views']):,} | Subs: {row['subscribers']:,} | Multiplier: {row['multiplier_ratio']:.0f}x | 
+                            {'🟡 OUTLIER' if row['is_outlier'] else '⚪ Normal'}
+                        </div>
+                        """, unsafe_allow_html=True)
                     
                     st.markdown("---")
                     
@@ -283,27 +327,38 @@ else:
                     c1, c2 = st.columns(2)
                     
                     with c1:
-                        st.write("**View Velocity Over Time**")
-                        st.line_chart(df.set_index("publish_date")["velocity"])
+                        st.write("**Views vs Subscriber Multiplier**")
+                        chart_data = df[["views", "multiplier_ratio"]].head(20)  # Top 20 for clarity
+                        st.scatter_chart(chart_data, x="multiplier_ratio", y="views")
                     
                     with c2:
-                        if not outliers.empty:
-                            st.write("**Top 10 Outliers by Z-Score**")
-                            top_10 = outliers.head(10)[["title", "z_score"]].copy()
-                            top_10["title"] = top_10["title"].str[:30] + "..."
-                            st.bar_chart(top_10.set_index("title")["z_score"])
+                        st.write("**Outlier Scores (Top Videos)**")
+                        if not outliers_df.empty:
+                            top_outliers = outliers_df.head(10)[["title", "outlier_score"]].copy()
+                            top_outliers["title"] = top_outliers["title"].str[:30] + "..."
+                            st.bar_chart(top_outliers.set_index("title")["outlier_score"])
                     
                     st.markdown("---")
                     
-                    # --- Detailed Table ---
-                    st.markdown("### 📋 Detailed Video Data")
-                    display_df = df[["title", "publish_date", "views", "velocity", "engagement_rate", "z_score", "is_outlier"]].copy()
+                    # --- Detailed Table (with Hyperlinked Titles) ---
+                    st.markdown("### 📋 Detailed Data")
+                    display_df = df[["title", "publish_date", "views", "subscribers", "multiplier_ratio", "velocity", "engagement_rate", "is_outlier"]].copy()
                     display_df["velocity"] = display_df["velocity"].round(2)
                     display_df["engagement_rate"] = (display_df["engagement_rate"] * 100).round(2).astype(str) + "%"
-                    display_df["z_score"] = display_df["z_score"].round(2)
-                    display_df = display_df.sort_values("z_score", ascending=False)
+                    display_df["multiplier_ratio"] = display_df["multiplier_ratio"].round(1)
+                    display_df = display_df.sort_values("outlier_score", ascending=False)
                     
-                    st.dataframe(display_df, use_container_width=True, hide_index=True)
+                    # Render table with hyperlinked titles
+                    for _, row in display_df.iterrows():
+                        youtube_url = f"https://www.youtube.com/watch?v={row['video_id']}"
+                        outlier_badge = "🟡 OUTLIER" if row["is_outlier"] else "⚪ Normal"
+                        st.markdown(f"""
+                        <div style="border: 1px solid #eee; padding: 10px; margin: 5px 0; border-radius: 5px;">
+                            <strong><a href="{youtube_url}" target="_blank" style="color: #1da1f2;">{row['title'][:60]}...</a></strong> | 
+                            {outlier_badge} | Views: {int(row['views']):,} | Subs: {int(row['subscribers']):,} | 
+                            Multiplier: {row['multiplier_ratio']}x | Velocity: {row['velocity']}
+                        </div>
+                        """, unsafe_allow_html=True)
 
 # --- Footer ---
 st.markdown("---")
