@@ -22,7 +22,7 @@ st.markdown("""
     a { color: #FF4B4B; text-decoration: none; }
     a:hover { text-decoration: underline; }
 
-    /* REDESIGNED INTRO SECTION */
+    /* Redesigned Intro Section */
     .hero-section {
         background: linear-gradient(135deg, #1a1a2e 0%, #10101a 100%);
         border: 1px solid #303742;
@@ -32,11 +32,12 @@ st.markdown("""
     }
     .hero-section h1 {
         font-weight: 700;
-        color: #FFFFFF !important; /* Force white title */
+        color: #FFFFFF !important;
         font-size: 2.5rem;
     }
-    .hero-section .description {
-        color: #FFFFFF !important; /* Force white description */
+    /* DEFINITIVE FIX FOR DESCRIPTION COLOR */
+    .hero-section [data-testid="stMarkdownContainer"] p {
+        color: #FFFFFF !important; /* Force pure white description */
         font-size: 1.1rem;
         max-width: 800px;
     }
@@ -142,13 +143,10 @@ def analyze_videos(youtube_service, search_type, query_input, view_multiplier, m
 
 if "api_key_valid" not in st.session_state: st.session_state.api_key_valid = False
 
-# REDESIGNED HERO SECTION TO FIX ALL INTRO BUGS
 st.markdown('<div class="hero-section">', unsafe_allow_html=True)
 st.markdown("<h1>🎬 YouTube Outlier Video Hunter</h1>", unsafe_allow_html=True)
-st.markdown("<p class='description'>A free tool by <a href='https://writewing.in' target='_blank'>Write Wing Media</a> to discover viral videos and analyze performance.</p>", unsafe_allow_html=True)
-
+st.markdown("A free tool by <a href='https://writewing.in' target='_blank'>Write Wing Media</a> to discover viral videos and analyze performance.", unsafe_allow_html=True)
 st.markdown("<br>", unsafe_allow_html=True)
-
 if not st.session_state.api_key_valid:
     st.header("1. Enter API Key")
     api_key = st.text_input("YouTube Data API Key", type="password", placeholder="AIza...")
