@@ -6,7 +6,7 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from datetime import datetime, timezone
 
-st.set_page_config(page_title="YouTube Outlier Finder", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="YouTube Outlier Video Hunter", layout="wide", initial_sidebar_state="collapsed")
 
 # --- Custom CSS for Dark Theme, Red Accents, and Custom Layouts ---
 st.markdown("""
@@ -128,7 +128,7 @@ def analyze_videos(youtube_service, search_type, query_input, view_multiplier, m
             df['is_outlier'] = df['outlier_score'] > avg_multiplier
         else:
             df = df[df['views'] >= min_views].copy()
-            if df.empty: return df, df, None # Return empty if no videos meet min_views
+            if df.empty: return df, df, None
             df['outlier_score'] = df['views'] / np.maximum(1, df['subscribers'])
             df['is_outlier'] = df['outlier_score'] > view_multiplier
         
@@ -137,7 +137,7 @@ def analyze_videos(youtube_service, search_type, query_input, view_multiplier, m
     except Exception as e: return None, None, f"An unexpected error occurred: {str(e)}"
 
 # --- UI & APP FLOW ---
-st.title("🎬 YouTube Outlier Finder")
+st.title("🎬 YouTube Outlier Video Hunter") # CORRECTED TITLE
 st.markdown("A free tool by [Write Wing Media](https://writewing.in) to discover viral videos and analyze performance.")
 
 if "api_key_valid" not in st.session_state: st.session_state.api_key_valid = False
@@ -168,7 +168,6 @@ else:
         view_multiplier, min_views = 100, 50000
     else:
         view_multiplier = c2.slider("View-to-Sub Multiplier", 10, 1000, 100)
-        # CORRECTED SYNTAX FOR THE SLIDER OPTIONS
         slider_options = [k * 10000 for k in range(1, 10)] + [100000, 250000, 500000, 1000000]
         min_views = c2.select_slider("Min. Views", options=slider_options, value=50000)
         avg_multiplier = 10
@@ -229,4 +228,11 @@ if 'query_params' in st.session_state and st.session_state.query_params[1].strip
 
 # --- FOOTER ---
 st.markdown("---")
-st.markdown('<div class="footer">Built with ❤️ by Write Wing Media using Streamlit & Python.</div>', unsafe_allow_html=True)
+# CORRECTED FOOTER WITH API KEY LINK
+st.markdown(
+    '<div class="footer">'
+    'Built by <a href="https://writewing.in" target="_blank">Write Wing Media</a> | '
+    '<a href="https://console.cloud.google.com/apis/library/youtubedata-api.googleapis.com" target="_blank">Get your free YouTube API key</a>'
+    '</div>',
+    unsafe_allow_html=True
+)
