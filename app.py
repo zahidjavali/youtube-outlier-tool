@@ -8,37 +8,45 @@ from datetime import datetime, timezone
 
 st.set_page_config(page_title="YouTube Outlier Video Hunter", page_icon="🎬", layout="wide", initial_sidebar_state="collapsed")
 
-# --- Custom CSS for Dark Theme, Red Accents, and Custom Layouts ---
+# --- Custom CSS for Dark Theme, Red Accents, and a new "Hero" Intro Section ---
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
 
     html, body, [class*="st-"] { font-family: 'Inter', sans-serif; }
     
-    /* DEFINITIVE FIX: Force the entire app background to be dark */
-    [data-testid="stAppViewContainer"] > .main {
-        background-color: #0E1117;
-    }
-    
+    [data-testid="stAppViewContainer"] > .main { background-color: #0E1117; }
     body { background-color: #0E1117; }
-    
     .main .block-container { padding: 2rem 3rem; }
-    
-    h1 { font-weight: 700; color: #FFFFFF !important; }
-    h2, h3 { font-weight: 700; color: #FFFFFF; }
     
     a { color: #FF4B4B; text-decoration: none; }
     a:hover { text-decoration: underline; }
 
-    .config-box { background-color: #161A25; border: 1px solid #303742; border-radius: 12px; padding: 2rem; margin-bottom: 2rem; }
-    
+    /* REDESIGNED INTRO SECTION */
+    .hero-section {
+        background: linear-gradient(135deg, #1a1a2e 0%, #10101a 100%);
+        border: 1px solid #303742;
+        border-radius: 16px;
+        padding: 2.5rem 3rem;
+        margin-bottom: 2rem;
+    }
+    .hero-section h1 {
+        font-weight: 700;
+        color: #FFFFFF !important; /* Force white title */
+        font-size: 2.5rem;
+    }
+    .hero-section .description {
+        color: #FFFFFF !important; /* Force white description */
+        font-size: 1.1rem;
+        max-width: 800px;
+    }
+
+    /* Standard Elements */
+    h2, h3 { font-weight: 700; color: #FFFFFF; }
     .metric-card { background-color: #161A25; border: 1px solid #303742; border-radius: 12px; padding: 1.5rem; text-align: center; }
     .metric-card .metric-label { font-size: 1rem; color: #A0AEC0; }
     .metric-card .metric-value { font-size: 2.25rem; font-weight: 700; color: #FFFFFF; }
-    
     .stButton>button { border-radius: 8px; background-color: #FF4B4B; color: white; font-weight: 600; border: none; }
-    .stButton>button:hover { background-color: #E03C3C; color: white; }
-    
     .video-result-card { display: flex; align-items: flex-start; gap: 20px; padding: 1rem; background-color: #161A25; border: 1px solid #303742; border-radius: 12px; margin-bottom: 1rem; }
     .video-result-card.outlier { border-color: #FFD700; background-color: #2c2a22; }
     .video-thumbnail img { width: 160px; height: 90px; border-radius: 8px; object-fit: cover; }
@@ -132,12 +140,15 @@ def analyze_videos(youtube_service, search_type, query_input, view_multiplier, m
 
 # --- UI & APP FLOW ---
 
-st.markdown("<h1>🎬 YouTube Outlier Video Hunter</h1>", unsafe_allow_html=True)
-st.markdown("A free tool by [Write Wing Media](https://writewing.in) to discover viral videos and analyze performance.")
-
 if "api_key_valid" not in st.session_state: st.session_state.api_key_valid = False
 
-st.markdown('<div class="config-box">', unsafe_allow_html=True)
+# REDESIGNED HERO SECTION TO FIX ALL INTRO BUGS
+st.markdown('<div class="hero-section">', unsafe_allow_html=True)
+st.markdown("<h1>🎬 YouTube Outlier Video Hunter</h1>", unsafe_allow_html=True)
+st.markdown("<p class='description'>A free tool by <a href='https://writewing.in' target='_blank'>Write Wing Media</a> to discover viral videos and analyze performance.</p>", unsafe_allow_html=True)
+
+st.markdown("<br>", unsafe_allow_html=True)
+
 if not st.session_state.api_key_valid:
     st.header("1. Enter API Key")
     api_key = st.text_input("YouTube Data API Key", type="password", placeholder="AIza...")
@@ -147,17 +158,10 @@ if not st.session_state.api_key_valid:
         else: st.error("Invalid API Key.")
 else:
     st.header("2. Analysis Configuration")
-    
-    stype_option = st.radio(
-        "Select an Analysis Mode:",
-        ("Search Term (vs Subs)", "Search Term (vs Channel Avg)", "By Channel (vs Subs)", "By Channel (vs Channel Avg)"),
-        key="analysis_mode"
-    )
+    stype_option = st.radio("Select an Analysis Mode:", ("Search Term (vs Subs)", "Search Term (vs Channel Avg)", "By Channel (vs Subs)", "By Channel (vs Channel Avg)"), key="analysis_mode")
     stype_val = {"Search Term (vs Subs)": "search_vs_subs", "Search Term (vs Channel Avg)": "search_vs_avg", "By Channel (vs Subs)": "channel_vs_subs", "By Channel (vs Channel Avg)": "channel_avg_self"}[stype_option]
-    
     c1, c2 = st.columns(2)
     query = c1.text_input("Enter Channel URL/Handle or Search Term", placeholder="@mkbhd or 'AI product demos'")
-    
     with c2:
         if "avg" in stype_val:
             avg_multiplier = st.slider("Outlier Multiplier", 2, 50, 10, help="Flags videos with views > (Multiplier * Avg. Views)")
@@ -166,7 +170,6 @@ else:
             view_multiplier = st.slider("View-to-Sub Multiplier", 10, 1000, 100)
             min_views = st.select_slider("Min. Views", options=[k * 10000 for k in range(1, 10)] + [100000, 250000, 500000, 1000000], value=50000)
             avg_multiplier = 10
-
     if st.button("🔍 Find Outliers", use_container_width=True, type="primary"):
         st.session_state.query_params = (stype_val, query, view_multiplier, min_views, avg_multiplier)
 st.markdown('</div>', unsafe_allow_html=True)
@@ -192,22 +195,8 @@ if 'query_params' in st.session_state and st.session_state.query_params[1].strip
             else: v2.info("No outliers found to visualize.")
             st.header("📹 Analyzed Videos")
             for _, row in df.iterrows():
-                st.markdown(f"""
-                <div class="video-result-card {'outlier' if row['is_outlier'] else ''}">
-                    <div class="video-thumbnail"><a href="https://www.youtube.com/watch?v={row['video_id']}" target="_blank"><img src="{row['thumbnail']}" alt="Thumbnail"></a></div>
-                    <div class="video-details">
-                        <div class="video-title"><a href="https://www.youtube.com/watch?v={row['video_id']}" target="_blank">{row['title']}</a></div>
-                        <div class="video-stats">
-                            <span>Published: <strong>{row['published']}</strong></span><span>Views: <strong>{row['views']:,}</strong></span>
-                            <span>Likes: <strong>{row['likes']:,}</strong></span><span>Views/Day: <strong>{row['velocity']:,.0f}</strong></span>
-                            <span>Z-Score: <strong>{row['z_score']:.2f}</strong></span>
-                        </div>
-                    </div>
-                </div>""", unsafe_allow_html=True)
+                st.markdown(f"""<div class="video-result-card {'outlier' if row['is_outlier'] else ''}"><div class="video-thumbnail"><a href="https://www.youtube.com/watch?v={row['video_id']}" target="_blank"><img src="{row['thumbnail']}" alt="Thumbnail"></a></div><div class="video-details"><div class="video-title"><a href="https://www.youtube.com/watch?v={row['video_id']}" target="_blank">{row['title']}</a></div><div class="video-stats"><span>Published: <strong>{row['published']}</strong></span><span>Views: <strong>{row['views']:,}</strong></span><span>Likes: <strong>{row['likes']:,}</strong></span><span>Views/Day: <strong>{row['velocity']:,.0f}</strong></span><span>Z-Score: <strong>{row['z_score']:.2f}</strong></span></div></div></div>""", unsafe_allow_html=True)
 
 # --- FOOTER ---
 st.markdown("---")
-st.markdown(
-    '<div class="footer">Built by <a href="https://writewing.in" target="_blank">Write Wing Media</a> | <a href="https://console.cloud.google.com/apis/library/youtubedata-api.googleapis.com" target="_blank">Get your free YouTube API key</a></div>',
-    unsafe_allow_html=True
-)
+st.markdown('<div class="footer">Built by <a href="https://writewing.in" target="_blank">Write Wing Media</a> | <a href="https://console.cloud.google.com/apis/library/youtubedata-api.googleapis.com" target="_blank">Get your free YouTube API key</a></div>', unsafe_allow_html=True)
