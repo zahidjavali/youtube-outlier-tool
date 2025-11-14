@@ -15,10 +15,15 @@ st.markdown("""
 
     html, body, [class*="st-"] { font-family: 'Inter', sans-serif; }
     
-    body { background-color: #0E1117; color: #FAFAFA; }
+    /* DEFINITIVE FIX: Force the entire app background to be dark */
+    [data-testid="stAppViewContainer"] > .main {
+        background-color: #0E1117;
+    }
+    
+    body { background-color: #0E1117; }
+    
     .main .block-container { padding: 2rem 3rem; }
     
-    /* FORCING H1 TITLE COLOR */
     h1 { font-weight: 700; color: #FFFFFF !important; }
     h2, h3 { font-weight: 700; color: #FFFFFF; }
     
@@ -127,7 +132,6 @@ def analyze_videos(youtube_service, search_type, query_input, view_multiplier, m
 
 # --- UI & APP FLOW ---
 
-# FORCED H1 TITLE
 st.markdown("<h1>🎬 YouTube Outlier Video Hunter</h1>", unsafe_allow_html=True)
 st.markdown("A free tool by [Write Wing Media](https://writewing.in) to discover viral videos and analyze performance.")
 
@@ -144,7 +148,6 @@ if not st.session_state.api_key_valid:
 else:
     st.header("2. Analysis Configuration")
     
-    # BLACK BOX FIX: Using vertical radio buttons
     stype_option = st.radio(
         "Select an Analysis Mode:",
         ("Search Term (vs Subs)", "Search Term (vs Channel Avg)", "By Channel (vs Subs)", "By Channel (vs Channel Avg)"),
