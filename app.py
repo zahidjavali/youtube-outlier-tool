@@ -17,7 +17,10 @@ st.markdown("""
     
     body { background-color: #0E1117; color: #FAFAFA; }
     .main .block-container { padding: 2rem 3rem; }
-    h1, h2, h3 { font-weight: 700; color: #FFFFFF; }
+    
+    /* FORCING H1 TITLE COLOR */
+    h1 { font-weight: 700; color: #FFFFFF !important; }
+    h2, h3 { font-weight: 700; color: #FFFFFF; }
     
     a { color: #FF4B4B; text-decoration: none; }
     a:hover { text-decoration: underline; }
@@ -43,7 +46,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-# --- API & UTILITY FUNCTIONS (No changes) ---
+# --- API & UTILITY FUNCTIONS ---
 @st.cache_resource
 def get_youtube_service(api_key: str):
     try:
@@ -75,7 +78,7 @@ def get_channel_stats(_youtube_service, channel_ids):
         return stats_dict
     except: return stats_dict
 
-# --- CORE ANALYSIS ENGINE (No changes) ---
+# --- CORE ANALYSIS ENGINE ---
 def analyze_videos(youtube_service, search_type, query_input, view_multiplier, min_views, avg_multiplier):
     try:
         resolved_channel_id = get_channel_id_from_input(youtube_service, query_input) if "channel" in search_type else None
@@ -124,13 +127,12 @@ def analyze_videos(youtube_service, search_type, query_input, view_multiplier, m
 
 # --- UI & APP FLOW ---
 
-# CORRECTED TITLE
+# FORCED H1 TITLE
 st.markdown("<h1>🎬 YouTube Outlier Video Hunter</h1>", unsafe_allow_html=True)
 st.markdown("A free tool by [Write Wing Media](https://writewing.in) to discover viral videos and analyze performance.")
 
 if "api_key_valid" not in st.session_state: st.session_state.api_key_valid = False
 
-# RESTRUCTURED CONFIG BOX TO PREVENT RENDER BUGS
 st.markdown('<div class="config-box">', unsafe_allow_html=True)
 if not st.session_state.api_key_valid:
     st.header("1. Enter API Key")
@@ -141,22 +143,32 @@ if not st.session_state.api_key_valid:
         else: st.error("Invalid API Key.")
 else:
     st.header("2. Analysis Configuration")
-    stype_option = st.radio("Mode:", ("Search Term (vs Subs)", "Search Term (vs Channel Avg)", "By Channel (vs Subs)", "By Channel (vs Channel Avg)"), horizontal=True, key="analysis_mode")
+    
+    # BLACK BOX FIX: Using vertical radio buttons
+    stype_option = st.radio(
+        "Select an Analysis Mode:",
+        ("Search Term (vs Subs)", "Search Term (vs Channel Avg)", "By Channel (vs Subs)", "By Channel (vs Channel Avg)"),
+        key="analysis_mode"
+    )
     stype_val = {"Search Term (vs Subs)": "search_vs_subs", "Search Term (vs Channel Avg)": "search_vs_avg", "By Channel (vs Subs)": "channel_vs_subs", "By Channel (vs Channel Avg)": "channel_avg_self"}[stype_option]
+    
     c1, c2 = st.columns(2)
-    query = c1.text_input("Channel URL/Handle" if "channel" in stype_val else "Search Term", placeholder="@mkbhd or 'AI demos'")
-    if "avg" in stype_val:
-        avg_multiplier = c2.slider("Outlier Multiplier", 2, 50, 10, help="Flags videos with views > (Multiplier * Avg. Views)")
-        view_multiplier, min_views = 100, 50000
-    else:
-        view_multiplier = c2.slider("View-to-Sub Multiplier", 10, 1000, 100)
-        min_views = c2.select_slider("Min. Views", options=[k * 10000 for k in range(1, 10)] + [100000, 250000, 500000, 1000000], value=50000)
-        avg_multiplier = 10
+    query = c1.text_input("Enter Channel URL/Handle or Search Term", placeholder="@mkbhd or 'AI product demos'")
+    
+    with c2:
+        if "avg" in stype_val:
+            avg_multiplier = st.slider("Outlier Multiplier", 2, 50, 10, help="Flags videos with views > (Multiplier * Avg. Views)")
+            view_multiplier, min_views = 100, 50000
+        else:
+            view_multiplier = st.slider("View-to-Sub Multiplier", 10, 1000, 100)
+            min_views = st.select_slider("Min. Views", options=[k * 10000 for k in range(1, 10)] + [100000, 250000, 500000, 1000000], value=50000)
+            avg_multiplier = 10
+
     if st.button("🔍 Find Outliers", use_container_width=True, type="primary"):
         st.session_state.query_params = (stype_val, query, view_multiplier, min_views, avg_multiplier)
 st.markdown('</div>', unsafe_allow_html=True)
 
-# --- RESULTS DISPLAY (No changes) ---
+# --- RESULTS DISPLAY ---
 if 'query_params' in st.session_state and st.session_state.query_params[1].strip():
     with st.spinner("🔄 Analyzing videos..."):
         df, outliers_df, err = analyze_videos(st.session_state.yt, *st.session_state.query_params)
