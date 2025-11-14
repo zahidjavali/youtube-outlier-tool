@@ -8,54 +8,56 @@ from datetime import datetime, timezone
 
 st.set_page_config(page_title="YouTube Outlier Video Hunter", page_icon="🎬", layout="wide", initial_sidebar_state="collapsed")
 
-# --- Custom CSS for Dark Theme, Red Accents, and a new "Hero" Intro Section ---
+# --- CSS for a Clean, Professional LIGHT THEME ---
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
 
     html, body, [class*="st-"] { font-family: 'Inter', sans-serif; }
     
-    [data-testid="stAppViewContainer"] > .main { background-color: #0E1117; }
-    body { background-color: #0E1117; }
+    /* Set main background to white */
+    [data-testid="stAppViewContainer"] > .main { background-color: #FFFFFF; }
+    
     .main .block-container { padding: 2rem 3rem; }
     
-    a { color: #FF4B4B; text-decoration: none; }
+    /* Set all text to black */
+    h1, h2, h3, p, span, div, label {
+        color: #000000 !important;
+    }
+    
+    a { color: #0072b1; text-decoration: none; }
     a:hover { text-decoration: underline; }
 
-    /* Redesigned Intro Section */
+    /* Redesigned Light "Hero" Section */
     .hero-section {
-        background: linear-gradient(135deg, #1a1a2e 0%, #10101a 100%);
-        border: 1px solid #303742;
+        background-color: #F0F2F6; /* Light grey for pop */
+        border: 1px solid #E0E0E0;
         border-radius: 16px;
         padding: 2.5rem 3rem;
         margin-bottom: 2rem;
     }
-    .hero-section h1 {
-        font-weight: 700;
-        color: #FFFFFF !important;
-        font-size: 2.5rem;
-    }
-    /* DEFINITIVE FIX FOR DESCRIPTION COLOR */
-    .hero-section [data-testid="stMarkdownContainer"] p {
-        color: #FFFFFF !important; /* Force pure white description */
+    .hero-section h1, .hero-section h2 { color: #000000 !important; }
+    .hero-section .description {
+        color: #333333 !important; /* Slightly softer black for description */
         font-size: 1.1rem;
         max-width: 800px;
     }
 
-    /* Standard Elements */
-    h2, h3 { font-weight: 700; color: #FFFFFF; }
-    .metric-card { background-color: #161A25; border: 1px solid #303742; border-radius: 12px; padding: 1.5rem; text-align: center; }
-    .metric-card .metric-label { font-size: 1rem; color: #A0AEC0; }
-    .metric-card .metric-value { font-size: 2.25rem; font-weight: 700; color: #FFFFFF; }
-    .stButton>button { border-radius: 8px; background-color: #FF4B4B; color: white; font-weight: 600; border: none; }
-    .video-result-card { display: flex; align-items: flex-start; gap: 20px; padding: 1rem; background-color: #161A25; border: 1px solid #303742; border-radius: 12px; margin-bottom: 1rem; }
-    .video-result-card.outlier { border-color: #FFD700; background-color: #2c2a22; }
+    /* Standard Light Theme Elements */
+    .metric-card { background-color: #F0F2F6; border: 1px solid #E0E0E0; border-radius: 12px; padding: 1.5rem; text-align: center; }
+    .metric-card .metric-label { font-size: 1rem; color: #555555 !important; }
+    .metric-card .metric-value { font-size: 2.25rem; font-weight: 700; color: #000000 !important; }
+    
+    .video-result-card { display: flex; align-items: flex-start; gap: 20px; padding: 1rem; background-color: #FFFFFF; border: 1px solid #E0E0E0; border-radius: 12px; margin-bottom: 1rem; }
+    .video-result-card.outlier { border-color: #FFC700; background-color: #FFFBEB; }
     .video-thumbnail img { width: 160px; height: 90px; border-radius: 8px; object-fit: cover; }
     .video-details { flex: 1; }
-    .video-title a { font-size: 1.1rem; font-weight: 600; margin-bottom: 8px; color: #FFFFFF !important; }
-    .video-stats { display: flex; flex-wrap: wrap; gap: 15px; font-size: 0.9rem; color: #A0AEC0; }
-    .video-stats strong { color: #FAFAFA; }
-    .footer { text-align: center; padding: 2rem 0; color: #A0AEC0; }
+    .video-title a { font-size: 1.1rem; font-weight: 600; margin-bottom: 8px; color: #000000 !important; }
+    .video-stats { display: flex; flex-wrap: wrap; gap: 15px; font-size: 0.9rem; color: #555555 !important; }
+    .video-stats strong { color: #000000 !important; }
+    
+    .footer { text-align: center; padding: 2rem 0; color: #555555 !important; }
+    .footer a { color: #0072b1 !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -145,7 +147,7 @@ if "api_key_valid" not in st.session_state: st.session_state.api_key_valid = Fal
 
 st.markdown('<div class="hero-section">', unsafe_allow_html=True)
 st.markdown("<h1>🎬 YouTube Outlier Video Hunter</h1>", unsafe_allow_html=True)
-st.markdown("A free tool by <a href='https://writewing.in' target='_blank'>Write Wing Media</a> to discover viral videos and analyze performance.", unsafe_allow_html=True)
+st.markdown("<p class='description'>A free tool by <a href='https://writewing.in' target='_blank'>Write Wing Media</a> to discover viral videos and analyze performance.</p>", unsafe_allow_html=True)
 st.markdown("<br>", unsafe_allow_html=True)
 if not st.session_state.api_key_valid:
     st.header("1. Enter API Key")
