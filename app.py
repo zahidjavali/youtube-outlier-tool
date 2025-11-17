@@ -1,202 +1,206 @@
 import streamlit as st
-import pandas as pd
-import numpy as np
-import re
+import google.generativeai as genai
+from youtube_transcript_api import YouTubeTranscriptApi
 from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
-from datetime import datetime, timezone
 
-st.set_page_config(page_title="YouTube Outlier Video Hunter", page_icon="🎬", layout="wide", initial_sidebar_state="collapsed")
+# --- Page Configuration and Secrets ---
+st.set_page_config(page_title="YouTube Outlier Video Hunter & Analyst", page_icon="🚀", layout="wide")
 
-# --- CSS for a Clean, Professional LIGHT THEME ---
+# Try to get API keys from Streamlit secrets
+try:
+    YOUTUBE_API_KEY = st.secrets["youtube"]["api_key"]
+    GEMINI_API_KEY = st.secrets["google_ai"]["gemini_api_key"]
+except (FileNotFoundError, KeyError):
+    st.warning("API keys not found in st.secrets. Please enter them manually below.")
+    YOUTUBE_API_KEY = ""
+    GEMINI_API_KEY = ""
+
+# --- Custom CSS ---
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
-
-    html, body, [class*="st-"] { font-family: 'Inter', sans-serif; }
-    
-    /* Set main background to white */
-    [data-testid="stAppViewContainer"] > .main { background-color: #FFFFFF; }
-    
-    .main .block-container { padding: 2rem 3rem; }
-    
-    /* Set all text to black */
-    h1, h2, h3, p, span, div, label {
-        color: #000000 !important;
-    }
-    
-    a { color: #0072b1; text-decoration: none; }
-    a:hover { text-decoration: underline; }
-
-    /* Redesigned Light "Hero" Section */
-    .hero-section {
-        background-color: #F0F2F6; /* Light grey for pop */
+   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+   html, body, [class*="st-"] { font-family: 'Inter', sans-serif; }
+   .main .block-container { padding: 2rem 3rem; }
+   [data-testid="stAppViewContainer"] > .main { background-color: #FFFFFF; }
+   h1, h2, h3, p, span, div, label { color: #000000 !important; }
+   a { color: #0072b1; text-decoration: none; }
+   a:hover { text-decoration: underline; }
+   .hero-section {
+        background-color: #F0F2F6;
         border: 1px solid #E0E0E0;
         border-radius: 16px;
         padding: 2.5rem 3rem;
         margin-bottom: 2rem;
-    }
-    .hero-section h1, .hero-section h2 { color: #000000 !important; }
+   }
+   .hero-section h1, .hero-section h2 { color: #000000 !important; }
     .hero-section .description {
-        color: #333333 !important; /* Slightly softer black for description */
+        color: #333333 !important;
         font-size: 1.1rem;
         max-width: 800px;
-    }
-
-    /* Standard Light Theme Elements */
+   }
     .metric-card { background-color: #F0F2F6; border: 1px solid #E0E0E0; border-radius: 12px; padding: 1.5rem; text-align: center; }
     .metric-card .metric-label { font-size: 1rem; color: #555555 !important; }
     .metric-card .metric-value { font-size: 2.25rem; font-weight: 700; color: #000000 !important; }
-    
     .video-result-card { display: flex; align-items: flex-start; gap: 20px; padding: 1rem; background-color: #FFFFFF; border: 1px solid #E0E0E0; border-radius: 12px; margin-bottom: 1rem; }
-    .video-result-card.outlier { border-color: #FFC700; background-color: #FFFBEB; }
+    .outlier-card { background-color: #FFFBEB; border: 1px solid #FFC700; border-radius: 12px; padding: 1.5rem; margin-bottom: 1.5rem; }
     .video-thumbnail img { width: 160px; height: 90px; border-radius: 8px; object-fit: cover; }
     .video-details { flex: 1; }
     .video-title a { font-size: 1.1rem; font-weight: 600; margin-bottom: 8px; color: #000000 !important; }
     .video-stats { display: flex; flex-wrap: wrap; gap: 15px; font-size: 0.9rem; color: #555555 !important; }
     .video-stats strong { color: #000000 !important; }
-    
     .footer { text-align: center; padding: 2rem 0; color: #555555 !important; }
     .footer a { color: #0072b1 !important; }
 </style>
 """, unsafe_allow_html=True)
 
+# --- State Management ---
+for key in ['api_key_valid', 'analysis_loading', 'analysis_result', 'analysis_target_video', 'videos', 'avg_views']:
+    if key not in st.session_state:
+        st.session_state[key] = None if key != 'api_key_valid' else False
 
-# --- API & UTILITY FUNCTIONS ---
-@st.cache_resource
-def get_youtube_service(api_key: str):
+# --- Core Functions ---
+def get_transcript(video_id):
     try:
-        service = build("youtube", "v3", developerKey=api_key)
-        service.channels().list(part="id", id="UC_x5XG1OV2P6uZZ5FSM9Ttw").execute(); return service
-    except: return None
+        return " ".join([item['text'] for item in YouTubeTranscriptApi.get_transcript(video_id)])
+    except Exception as e:
+        st.warning(f"Could not retrieve transcript for video ID {video_id}: {e}")
+        return None
 
-@st.cache_data(ttl=3600)
-def get_channel_id_from_input(_youtube_service, user_input: str):
-    user_input = user_input.strip()
-    id_match = re.search(r"(UC[a-zA-Z0-9_-]{22})", user_input)
-    if id_match: return id_match.group(1)
-    handle_match = re.search(r"(@[a-zA-Z0-9_.-]+)", user_input)
-    handle = handle_match.group(1) if handle_match else f"@{user_input.split('/')[-1]}"
+def get_video_details(youtube_service, video_id):
     try:
-        req = _youtube_service.search().list(part="id", q=handle, type="channel", maxResults=1); res = req.execute()
-        return res["items"][0]["id"]["channelId"] if res.get("items") else None
-    except: return None
+        request = youtube_service.videos().list(part="snippet", id=video_id)
+        response = request.execute()
+        if response['items']:
+            snippet = response['items'][0]['snippet']
+            return snippet['title'], snippet['description']
+    except Exception as e:
+        st.error(f"Could not retrieve video details: {e}")
+    return None, None
 
-@st.cache_data(ttl=3600)
-def get_channel_stats(_youtube_service, channel_ids):
-    stats_dict = {}
+def get_ai_analysis(video_id, youtube_service):
+    st.session_state.analysis_loading = True
+    st.session_state.analysis_result = None
+    transcript = get_transcript(video_id)
+    if not transcript:
+        st.session_state.analysis_loading = False
+        return
+    title, description = get_video_details(youtube_service, video_id)
+    if not title:
+        st.session_state.analysis_loading = False
+        return
     try:
-        for i in range(0, len(channel_ids), 50):
-            req = _youtube_service.channels().list(part="statistics", id=",".join(channel_ids[i:i+50])); channels = req.execute().get("items", [])
-            for ch in channels:
-                stats = ch.get("statistics", {})
-                stats_dict[ch["id"]] = {"subscribers": int(stats.get("subscriberCount", 0)), "average_views": int(stats.get("viewCount", 0)) / max(1, int(stats.get("videoCount", 1)))}
-        return stats_dict
-    except: return stats_dict
+        genai.configure(api_key=GEMINI_API_KEY)
+        model = genai.GenerativeModel('gemini-pro')
+        prompt = f"""
+        As an expert YouTube strategist, analyze this 'outlier' video and provide a blueprint to create a better one.
 
-# --- CORE ANALYSIS ENGINE ---
-def analyze_videos(youtube_service, search_type, query_input, view_multiplier, min_views, avg_multiplier):
-    try:
-        resolved_channel_id = get_channel_id_from_input(youtube_service, query_input) if "channel" in search_type else None
-        if "channel" in search_type and not resolved_channel_id: return None, None, f"❌ Could not find channel for '{query_input}'."
+        **Video Analysis:**
+        - **Original Title:** {title}
+        - **Original Transcript:**\n'''{transcript}'''
 
-        order = "date" if search_type == "channel_avg_self" else "viewCount"
-        params = {"part": "snippet", "maxResults": 50, "type": "video", "order": order}
-        if "channel" in search_type: params["channelId"] = resolved_channel_id
-        else: params["q"] = query_input
-        
-        search_results = youtube_service.search().list(**params).execute().get("items", [])
-        if not search_results: return None, None, "No videos found."
+        **Your Mission:**
+        1. **Content Gap Analysis:** Identify 3-5 specific weaknesses or missed opportunities in the original script.
+        2. **Generate a Better Title:** Create one new, clickable, SEO-optimized title (under 70 characters).
+        3. **Generate a Better Script:** Write a new, complete video script designed for higher retention, including a strong hook, clear structure, visual cues (e.g., "[Visual: B-roll]"), and a call-to-action.
 
-        video_ids = [item["id"]["videoId"] for item in search_results]
-        video_details = youtube_service.videos().list(part="snippet,statistics", id=",".join(video_ids)).execute().get("items", [])
-        channel_ids = list(set(item["snippet"]["channelId"] for item in video_details))
-        all_channel_stats = get_channel_stats(youtube_service, channel_ids)
-        
-        rows = []
-        for v in video_details:
-            stats, snip, video_id = v.get("statistics", {}), v.get("snippet", {}), v.get("id")
-            pub_date = datetime.fromisoformat(snip["publishedAt"].replace("Z", "+00:00"))
-            rows.append({
-                "video_id": video_id, "published": pub_date.date(), "title": snip.get("title", "N/A"),
-                "thumbnail": snip.get("thumbnails", {}).get("medium", {}).get("url") or f"https://img.youtube.com/vi/{video_id}/mqdefault.jpg",
-                "views": int(stats.get("viewCount", 0)), "likes": int(stats.get("likeCount", 0)), "comments": int(stats.get("commentCount", 0)),
-                "velocity": int(stats.get("viewCount", 0)) / max(1, (datetime.now(timezone.utc) - pub_date).days),
-                "subscribers": all_channel_stats.get(snip.get("channelId", ""), {}).get("subscribers", 0),
-                "channel_avg_views": all_channel_stats.get(snip.get("channelId", ""), {}).get("average_views", 0),
-            })
-        df = pd.DataFrame(rows)
-        if df.empty: return None, None, "No data processed."
+        Format your response clearly with Markdown headings for "Content Gaps," "New Title," and "New Script".
+        """
+        response = model.generate_content(prompt)
+        st.session_state.analysis_result = response.text
+    except Exception as e:
+        st.error(f"Error during AI analysis: {e}")
+    finally:
+        st.session_state.analysis_loading = False
 
-        df['z_score'] = ((df['views'] - df['views'].mean()) / df['views'].std()).fillna(0)
-        if "avg" in search_type:
-            avg_source = df['views'].mean() if search_type == "channel_avg_self" else df['channel_avg_views']
-            df['outlier_score'] = df['views'] / np.maximum(1, avg_source); df['is_outlier'] = df['outlier_score'] > avg_multiplier
-        else:
-            df = df[df['views'] >= min_views].copy(); 
-            if df.empty: return df, df, None
-            df['outlier_score'] = df['views'] / np.maximum(1, df['subscribers']); df['is_outlier'] = df['outlier_score'] > view_multiplier
-        
-        return df.sort_values("outlier_score", ascending=False), df[df["is_outlier"]], None
-    except HttpError as e: return None, None, f"API error: {getattr(e, 'reason', str(e))}"
-    except Exception as e: return None, None, f"An unexpected error occurred: {str(e)}"
+def analyze_videos(youtube_service, search_type, query_input, view_multiplier, max_results):
+    st.info("Displaying sample data. Replace `analyze_videos` with your own logic.")
+    sample_videos = [
+        {'videoId': 'jNQXAC9IVRw', 'title': 'Sample Outlier 1: How to Go Viral', 'thumbnail': 'https://i.ytimg.com/vi/jNQXAC9IVRw/hqdefault.jpg', 'views': 500000, 'channel': 'Channel B', 'is_outlier': True, 'days_since_published': 30, 'url': 'https://www.youtube.com/watch?v=jNQXAC9IVRw'},
+        {'videoId': 'L_LUpnjgPso', 'title': 'Sample Outlier 2: Another Viral Hit', 'thumbnail': 'https://i.ytimg.com/vi/L_LUpnjgPso/hqdefault.jpg', 'views': 800000, 'channel': 'Channel D', 'is_outlier': True, 'days_since_published': 45, 'url': 'https://www.youtube.com/watch?v=L_LUpnjgPso'},
+        {'videoId': 'dQw4w9WgXcQ', 'title': 'Sample Video: Not an Outlier', 'thumbnail': 'https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg', 'views': 15000, 'channel': 'Channel A', 'is_outlier': False, 'days_since_published': 100, 'url': 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'},
+        {'videoId': 'o-YBDTqX_ZU', 'title': 'Sample Video: A Standard Upload', 'thumbnail': 'https://i.ytimg.com/vi/o-YBDTqX_ZU/hqdefault.jpg', 'views': 25000, 'channel': 'Channel C', 'is_outlier': False, 'days_since_published': 60, 'url': 'https://www.youtube.com/watch?v=o-YBDTqX_ZU'}
+    ]
+    avg_views = 20000
+    return sample_videos, avg_views
 
-# --- UI & APP FLOW ---
+# --- STREAMLIT UI ---
+st.markdown('<div class="hero-section"><h1>🚀 YouTube Outlier Hunter & Analyst</h1><p class="description">A free tool by <a href="https://writewing.in" target="_blank">Write Wing Media</a> to discover viral videos and generate superior, AI-powered content strategies to outrank them.</p></div>', unsafe_allow_html=True)
 
-if "api_key_valid" not in st.session_state: st.session_state.api_key_valid = False
-
-st.markdown('<div class="hero-section">', unsafe_allow_html=True)
-st.markdown("<h1>🎬 YouTube Outlier Video Hunter</h1>", unsafe_allow_html=True)
-st.markdown("<p class='description'>A free tool by <a href='https://writewing.in' target='_blank'>Write Wing Media</a> to discover viral videos and analyze performance.</p>", unsafe_allow_html=True)
-st.markdown("<br>", unsafe_allow_html=True)
 if not st.session_state.api_key_valid:
-    st.header("1. Enter API Key")
-    api_key = st.text_input("YouTube Data API Key", type="password", placeholder="AIza...")
-    if st.button("✅ Validate & Save Key"):
-        if api_key and (yt_service := get_youtube_service(api_key)):
-            st.session_state.api_key_valid = True; st.session_state.yt = yt_service; st.rerun()
-        else: st.error("Invalid API Key.")
+    st.header("1. Enter API Keys")
+    if not YOUTUBE_API_KEY: YOUTUBE_API_KEY = st.text_input("YouTube Data API v3 Key", type="password")
+    if not GEMINI_API_KEY: GEMINI_API_KEY = st.text_input("Google AI Studio (Gemini) API Key", type="password")
+    if st.button("Validate Keys"):
+        if len(YOUTUBE_API_KEY) > 10 and len(GEMINI_API_KEY) > 10:
+            st.session_state.api_key_valid = True
+            st.rerun()
+        else: st.error("Please enter valid API keys.")
 else:
-    st.header("2. Analysis Configuration")
-    stype_option = st.radio("Select an Analysis Mode:", ("Search Term (vs Subs)", "Search Term (vs Channel Avg)", "By Channel (vs Subs)", "By Channel (vs Channel Avg)"), key="analysis_mode")
-    stype_val = {"Search Term (vs Subs)": "search_vs_subs", "Search Term (vs Channel Avg)": "search_vs_avg", "By Channel (vs Subs)": "channel_vs_subs", "By Channel (vs Channel Avg)": "channel_avg_self"}[stype_option]
-    c1, c2 = st.columns(2)
-    query = c1.text_input("Enter Channel URL/Handle or Search Term", placeholder="@mkbhd or 'AI product demos'")
-    with c2:
-        if "avg" in stype_val:
-            avg_multiplier = st.slider("Outlier Multiplier", 2, 50, 10, help="Flags videos with views > (Multiplier * Avg. Views)")
-            view_multiplier, min_views = 100, 50000
-        else:
-            view_multiplier = st.slider("View-to-Sub Multiplier", 10, 1000, 100)
-            min_views = st.select_slider("Min. Views", options=[k * 10000 for k in range(1, 10)] + [100000, 250000, 500000, 1000000], value=50000)
-            avg_multiplier = 10
-    if st.button("🔍 Find Outliers", use_container_width=True, type="primary"):
-        st.session_state.query_params = (stype_val, query, view_multiplier, min_views, avg_multiplier)
-st.markdown('</div>', unsafe_allow_html=True)
+    youtube_service = build('youtube', 'v3', developerKey=YOUTUBE_API_KEY)
+    st.header("2. Find Outlier Videos")
+    search_type = st.radio("Search by:", ("Keyword", "Channel URL"), horizontal=True)
+    query_input = st.text_input("Enter Keyword or Channel URL", "")
+    col1, col2 = st.columns(2)
+    with col1: view_multiplier = st.slider("Outlier Threshold (Views Multiplier)", 2, 20, 10)
+    with col2: max_results = st.slider("Videos to Analyze", 10, 50, 25)
 
-# --- RESULTS DISPLAY ---
-if 'query_params' in st.session_state and st.session_state.query_params[1].strip():
-    with st.spinner("🔄 Analyzing videos..."):
-        df, outliers_df, err = analyze_videos(st.session_state.yt, *st.session_state.query_params)
-        if err: st.error(err)
-        elif df is None or df.empty: st.warning("No videos found matching your criteria.")
-        else:
-            st.markdown("---")
-            m1, m2, m3 = st.columns(3)
-            m1.markdown(f'<div class="metric-card"><div class="metric-label">Total Views</div><div class="metric-value">{df["views"].sum():,}</div></div>', unsafe_allow_html=True)
-            m2.markdown(f'<div class="metric-card"><div class="metric-label">Avg. Views/Day</div><div class="metric-value">{df["velocity"].mean():,.0f}</div></div>', unsafe_allow_html=True)
-            m3.markdown(f'<div class="metric-card"><div class="metric-label">Total Likes</div><div class="metric-value">{df["likes"].sum():,}</div></div>', unsafe_allow_html=True)
-            st.markdown("<br>", unsafe_allow_html=True)
-            st.header("📊 Visualizations")
-            v1, v2 = st.columns(2)
-            v1.subheader("View Velocity Over Time"); v1.line_chart(df.sort_values("published")[["published", "velocity"]].set_index("published"))
-            v2.subheader("Top 10 Outliers by Velocity")
-            if not outliers_df.empty: v2.bar_chart(outliers_df.nlargest(10, "velocity")[["title", "velocity"]].set_index("title"))
-            else: v2.info("No outliers found to visualize.")
-            st.header("📹 Analyzed Videos")
-            for _, row in df.iterrows():
-                st.markdown(f"""<div class="video-result-card {'outlier' if row['is_outlier'] else ''}"><div class="video-thumbnail"><a href="https://www.youtube.com/watch?v={row['video_id']}" target="_blank"><img src="{row['thumbnail']}" alt="Thumbnail"></a></div><div class="video-details"><div class="video-title"><a href="https://www.youtube.com/watch?v={row['video_id']}" target="_blank">{row['title']}</a></div><div class="video-stats"><span>Published: <strong>{row['published']}</strong></span><span>Views: <strong>{row['views']:,}</strong></span><span>Likes: <strong>{row['likes']:,}</strong></span><span>Views/Day: <strong>{row['velocity']:,.0f}</strong></span><span>Z-Score: <strong>{row['z_score']:.2f}</strong></span></div></div></div>""", unsafe_allow_html=True)
+    if st.button("Hunt for Outliers", type="primary"):
+        if query_input:
+            with st.spinner("Analyzing YouTube..."):
+                videos, avg_views = analyze_videos(youtube_service, search_type, query_input, view_multiplier, max_results)
+                st.session_state.videos = videos
+                st.session_state.avg_views = avg_views
+                st.session_state.analysis_result = None # Clear previous analysis
+                st.session_state.analysis_target_video = None
+        else: st.warning("Please enter a search query.")
 
-# --- FOOTER ---
-st.markdown("---")
-st.markdown('<div class="footer">Built by <a href="https://writewing.in" target="_blank">Write Wing Media</a> | <a href="https://console.cloud.google.com/apis/library/youtubedata-api.googleapis.com" target="_blank">Get your free YouTube API key</a></div>', unsafe_allow_html=True)
+    if st.session_state.videos:
+        st.header("3. Analysis Results")
+        outlier_videos = [v for v in st.session_state.videos if v.get('is_outlier')]
+        other_videos = [v for v in st.session_state.videos if not v.get('is_outlier')]
+
+        if outlier_videos:
+            st.subheader("🏆 Outlier Videos Found")
+            for video in outlier_videos:
+                with st.container():
+                    st.markdown(f'<div class="outlier-card">', unsafe_allow_html=True)
+                    col1, col2 = st.columns([1, 4])
+                    with col1: st.image(video['thumbnail'], use_column_width=True)
+                    with col2:
+                        st.markdown(f"<h5><a href='{video['url']}' target='_blank'>{video['title']}</a></h5>", unsafe_allow_html=True)
+                        st.markdown(f"**Views:** {video['views']:,} | **Channel:** {video['channel']}")
+                        st.markdown(f"<span style='color:green;'>This video is an outlier, significantly outperforming the average.</span>", unsafe_allow_html=True)
+                        if st.button("🤖 Analyze & Generate Better Script", key=f"analyze_{video['videoId']}"):
+                            st.session_state.analysis_target_video = video
+                            get_ai_analysis(video['videoId'], youtube_service)
+                            st.rerun()
+                    st.markdown(f'</div>', unsafe_allow_html=True)
+
+        if st.session_state.analysis_loading: st.info("AI is analyzing, please wait...")
+        if st.session_state.analysis_result:
+            st.subheader("💡 AI Strategy Blueprint")
+            if st.session_state.analysis_target_video:
+                st.markdown(f"**Analysis for:** *{st.session_state.analysis_target_video['title']}*")
+            st.markdown(st.session_state.analysis_result, unsafe_allow_html=True)
+            if st.button("Clear Analysis"):
+                st.session_state.analysis_result = None
+                st.session_state.analysis_target_video = None
+                st.rerun()
+
+        if other_videos:
+            st.subheader("Other Videos Analyzed")
+            for video in other_videos:
+                st.markdown(f"""
+                <div class="video-result-card">
+                    <div class="video-thumbnail"><img src="{video['thumbnail']}"></div>
+                    <div class="video-details">
+                        <div class="video-title"><a href="{video['url']}" target="_blank">{video['title']}</a></div>
+                        <div class="video-stats">
+                            <span><strong>{video['views']:,}</strong> views</span>
+                            <span><strong>{video['days_since_published']}</strong> days ago</span>
+                            <span>by <strong>{video['channel']}</strong></span>
+                        </div>
+                    </div>
+                </div>""", unsafe_allow_html=True)
+
+st.markdown("<div class='footer'>Made with ❤️ by <a href='https://writewing.in' target='_blank'>Write Wing Media</a></div>", unsafe_allow_html=True)
