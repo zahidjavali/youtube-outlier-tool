@@ -194,7 +194,7 @@ if 'queryparams' in st.sessionstate and st.sessionstate.queryparams[1].strip():
             if not outliersdf.empty: v2.barchart(outliersdf.nlargest(10, "velocity")[["title", "velocity"]].setindex("title"))
             else: v2.info("No outliers found to visualize.")
             st.header("📹 Analyzed Videos")
-            for , row in df.iterrows():
+            for _, row in df.iterrows():
                 st.markdown(f"""<div class="video-result-card {'outlier' if row['isoutlier'] else ''}"><div class="video-thumbnail"><a href="https://www.youtube.com/watch?v={row['videoid']}" target="blank"><img src="{row['thumbnail']}" alt="Thumbnail"></a></div><div class="video-details"><div class="video-title"><a href="https://www.youtube.com/watch?v={row['videoid']}" target="blank">{row['title']}</a></div><div class="video-stats"><span>Published: <strong>{row['published']}</strong></span><span>Views: <strong>{row['views']:,}</strong></span><span>Likes: <strong>{row['likes']:,}</strong></span><span>Views/Day: <strong>{row['velocity']:,.0f}</strong></span><span>Z-Score: <strong>{row['zscore']:.2f}</strong></span></div></div></div>""", unsafeallow_html=True)
 
 # --- FOOTER ---
